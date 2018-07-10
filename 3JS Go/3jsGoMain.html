@@ -1,0 +1,1379 @@
+<html>
+<head>
+	<script src="libs/three.js"></script>
+	<script src="libs/threex.keyboardstate.js"></script>
+    <script src="libs/scenejs.js"></script>
+    <script src="libs/cannon.js"></script>
+    <script src="libs/helvetiker_regular.typeface.js"></script>
+    <script src="libs/wgo.js"></script>
+
+</head>
+
+<body>
+
+<script>
+//3JS Go by Nestor J. Maysonet
+
+//Three.js Setup
+var renderer, scene, camera, raycaster, gameClock;
+//Keyboard
+var keyboard = new THREEx.KeyboardState();
+//mouse vector
+var mouse = new THREE.Vector2(), INTERSECTED;
+//turn counter
+var turn = 0;
+//current player
+var currentPlayer = 1;
+//list of pieces
+var stoneList = [];
+//list of underlying cubes
+var cubeList = [];
+//Game State
+var gameState = 'ongoing'; //either 'ongoing', 'win', or 'lose'
+//WGo game
+var game;
+//helplight
+var helpLight;
+var helpCircle;
+//menu globals
+var ukiyoMesh;
+var threejsMesh;
+var humanMesh;
+var aiMesh;
+var inMenu = 1;
+var menuList = [];
+var playAI = 1;
+//pass global
+var passCount = 0;
+var whiteStoneCount = 0;
+var blackStoneCount = 0;
+//music
+var goMusic;
+
+//Audio Setup
+function LoadSounds()
+{
+	goMusic = new Audio("sounds/misty.mp3");
+	goMusic.volume = .2;
+	goMusic.loop = true;
+	goMusic.play();
+}
+
+
+//ENVIRONMENT FUNCTIONS
+
+function GenerateStone(xp,yp,color)
+{
+	var blackColor = 0x0D0D0D;
+	var whiteColor = 0xFDFDFD;
+
+	if(color == 1)
+	{
+		color = blackColor;
+	}
+	else if(color == 2)
+	{
+		color = whiteColor;
+	}
+	
+	var stoneGeometry = new THREE.SphereGeometry( 5, 16, 12);
+	stoneGeometry.applyMatrix( new THREE.Matrix4().makeScale(1.0,1.0,0.6));
+
+	var stoneMaterial = new THREE.MeshPhongMaterial({color: color});
+	var stoneMesh = new THREE.Mesh(stoneGeometry,stoneMaterial);
+	stoneMesh.position.x = xp;
+	stoneMesh.position.y = yp;
+	stoneMesh.position.z = 6;
+	scene.add(stoneMesh);
+	stoneList.push(stoneMesh);
+}
+
+function CreateGoTable()
+{
+	var texture = THREE.ImageUtils.loadTexture('images/shinkaya.jpg');
+	var gobanTopGeometry = new THREE.PlaneGeometry(190,190);
+	var gobanTopMaterial = new THREE.MeshPhongMaterial({map: texture});
+	var gobanTopMesh = new THREE.Mesh(gobanTopGeometry,gobanTopMaterial);
+	gobanTopMesh.position.x = 0;
+	gobanTopMesh.position.y = 0;
+	gobanTopMesh.position.z = 5;
+	scene.add(gobanTopMesh);
+
+	var gobanVertGeo = new THREE.PlaneGeometry(188,80);
+	var gobanVertMat = new THREE.MeshPhongMaterial({map:texture});
+	var gobanBottom = new THREE.Mesh(gobanVertGeo,gobanVertMat);
+	var gobanTop = new THREE.Mesh(gobanVertGeo,gobanVertMat);
+	gobanBottom.position.x = 0;
+	gobanBottom.position.y = -96;
+	gobanBottom.position.z = -32;
+	gobanBottom.rotation.x = Math.PI/2;
+	gobanTop.position.x = 0;
+	gobanTop.position.y = 95;
+	gobanTop.position.z = -35;
+	gobanTop.rotation.x = Math.PI/2;
+	scene.add(gobanBottom);
+	scene.add(gobanTop);
+}
+
+function HorizLine(xp,yp)
+{
+	var horizLineGeometry = new THREE.PlaneGeometry(180,1);
+	var horizLineMaterial = new THREE.MeshPhongMaterial({color: 'black'});
+	var horizLineMesh = new THREE.Mesh(horizLineGeometry,horizLineMaterial);
+	horizLineMesh.position.x = xp;
+	horizLineMesh.position.y = yp;
+	horizLineMesh.position.z = 6;
+	scene.add(horizLineMesh);
+}
+
+function VertLine(xp,yp)
+{
+	var vertLineGeometry = new THREE.PlaneGeometry(1,180);
+	var vertLineMaterial = new THREE.MeshPhongMaterial({color: 'black'});
+	var vertLineMesh = new THREE.Mesh(vertLineGeometry, vertLineMaterial);
+	vertLineMesh.position.x = xp;
+	vertLineMesh.position.y = yp;
+	vertLineMesh.position.z = 6;
+	scene.add(vertLineMesh);
+}
+
+function CreateGoLines()
+{
+	//horizontal lines
+	for(var i = 0; i < 19; i++)
+	{
+		HorizLine(0,-91 + (i*10));
+	}
+
+	//vertical lines
+	for(var i = 0; i < 19; i++)
+	{
+		VertLine(-90 + (i*10), -1);
+	}
+}
+
+//makes the little circles
+function GenerateCircle(xp,yp)
+{
+	var circleGeometry = new THREE.CircleGeometry(2,16);
+	var circleMaterial = new THREE.MeshPhongMaterial({color:'black'});
+	var circleMesh = new THREE.Mesh(circleGeometry,circleMaterial);
+	circleMesh.position.x = xp;
+	circleMesh.position.y = yp-1;
+	circleMesh.position.z = 6;
+	scene.add(circleMesh);
+}
+
+function CreateGoCircles()
+{
+	GenerateCircle(-60,-60);
+	GenerateCircle(0,-60);
+	GenerateCircle(60,-60);
+	GenerateCircle(-60,0);
+	GenerateCircle(0,0);
+	GenerateCircle(60,0);
+	GenerateCircle(-60,60);
+	GenerateCircle(0,60);
+	GenerateCircle(60,60);
+}
+
+function CreateTatamiMat()
+{
+	var texture = THREE.ImageUtils.loadTexture('images/straw.jpg');
+	var matGeometry = new THREE.PlaneGeometry(600,600);
+	var matMaterial = new THREE.MeshPhongMaterial({map:texture});
+	var matMesh = new THREE.Mesh(matGeometry,matMaterial);
+	matMesh.position.x = 0;
+	matMesh.position.y = 0;
+	matMesh.position.z = -30;
+	scene.add(matMesh);
+}
+
+function GenerateCube( x, y, color, name)
+{
+	var cubeg = new THREE.BoxGeometry(10,10,5);
+	var cubem = new THREE.MeshPhongMaterial({color: color})
+	var cubemesh = new THREE.Mesh(cubeg, cubem);
+	cubemesh.position.x = x;
+	cubemesh.position.y = y;
+	cubemesh.name = name;
+	scene.add(cubemesh);
+	cubeList.push(cubemesh);
+}
+
+function CreateHelpCircle()
+{
+	var circleGeometry = new THREE.CircleGeometry(5,16);
+	var circleMaterial = new THREE.MeshBasicMaterial({color: 'red'});
+	helpCircle = new THREE.Mesh(circleGeometry,circleMaterial);
+	helpCircle.position.x = 0;
+	helpCircle.position.y = 0;
+	helpCircle.position.z = 7;
+	scene.add(helpCircle);
+}
+
+//FOR MENU
+function CreateBackground()
+{
+	var texture = THREE.ImageUtils.loadTexture('images/ukiyo.jpg');
+	var ukiyoGeometry = new THREE.PlaneGeometry(300,300);
+	var ukiyoMaterial = new THREE.MeshPhongMaterial({map:texture});
+	ukiyoMesh = new THREE.Mesh(ukiyoGeometry,ukiyoMaterial);
+	ukiyoMesh.position.x = 0;
+	ukiyoMesh.position.y = 0;
+	ukiyoMesh.position.z = 0;
+	scene.add(ukiyoMesh);
+}
+
+function CreateMenuText()
+{
+	var humanGeometry = new THREE.TextGeometry('1: VS Human',{
+		size: 8,
+		height: 5,
+		curvesegments: 2,
+		font: "helvetiker"
+	});
+	var aiGeometry = new THREE.TextGeometry('2: VS AI',{
+		size: 8,
+		height: 5,
+		curvesegments: 2,
+		font: "helvetiker"
+	});
+	var threejsGeometry = new THREE.TextGeometry('Three.js Go!',
+	{
+		size:10,
+		height:5,
+		curvesegments:2,
+		font:"helvetiker"
+	});
+	var textMaterial = new THREE.MeshLambertMaterial({color: 'white'});
+	humanMesh = new THREE.Mesh(humanGeometry,textMaterial);
+	aiMesh = new THREE.Mesh(aiGeometry,textMaterial);
+	threejsMesh = new THREE.Mesh(threejsGeometry,textMaterial);
+	humanMesh.position.x = -30;
+	humanMesh.position.y = 0;
+	humanMesh.position.z = 20;
+	humanMesh.name = '>VS Human';
+	aiMesh.position.x = -30;
+	aiMesh.position.y = -20;
+	aiMesh.position.z = 20;
+	threejsMesh.position.x = -35;
+	threejsMesh.position.y = 18;
+	threejsMesh.position.z = 20;
+	threejsMesh.name = 'Three.js Go!';
+	scene.add(humanMesh);
+	scene.add(threejsMesh);
+	scene.add(aiMesh);
+	menuList.push(humanMesh);
+}
+
+//EVENT FUNCTIONS
+function onDocumentMouseMove(event)
+{
+	//when mouse moves the position vector is updated
+	event.preventDefault();
+
+	mouse.x = (event.clientX / window.innerWidth ) * 2 -1;
+	mouse.y = -(event.clientY / window.innerHeight) * 2 +1;
+
+	raycaster.setFromCamera(mouse,camera);
+
+	/*
+	if(inMenu == 1)
+	{
+		var intersects = raycaster.intersectObjects(menuList);
+
+		if(intersects.length > 0)
+		{
+			var text = menuList[0].object.name;
+			var textGeometry = new THREE.TextGeometry(text,
+			{
+				size: 8,
+				height: 5,
+				curvesegments: 2,
+				font: "helvetiker"
+			});
+			var textMaterial = new THREE.MeshLambertMaterial({color: 'red'});
+			var textMesh = new THREE.Mesh(textGeometry,textMaterial);
+			textMesh.name = menuList[0].object.name;
+			menuList.
+		}
+	}
+	*/
+	var intersects = raycaster.intersectObjects(cubeList);
+
+	if(intersects.length > 0)
+	{
+			xpos = intersects[0].object.position.x;
+			ypos = intersects[0].object.position.y;
+			helpCircle.position.x = xpos;
+			helpCircle.position.y = ypos-1;
+	}
+}
+
+function onMouseClick(event)
+{
+	if(inMenu == 0)
+	{
+		raycaster.setFromCamera(mouse,camera);
+
+		var intersects = raycaster.intersectObjects(cubeList);
+
+		if(intersects.length > 0)
+		{
+			xpos = intersects[0].object.position.x;
+			ypos = intersects[0].object.position.y;
+
+			var result = game.play((xpos + 90) / 10, (ypos + 90) / 10);
+			
+			if(result == 1)
+			{
+				console.log("Not on board");
+			}
+			else if(result == 2)
+			{
+				console.log("Already has stone");
+				alert("That spot already has a stone!");
+			}
+			else if(result == 3)
+			{
+				console.log("Suicide. Should not happen.");
+				alert("Suicide!!!");
+			}
+			else if(result == 4)
+			{
+				console.log("Repeated position");
+				alert("That position would be a repeated one!");
+			}
+			else
+			{
+				if(game.turn == WGo.B || game.turn == WGo.W)
+				{
+					passCount = 0;
+					if(game.turn == WGo.B)
+					{
+						whiteStoneCount++;
+						blackStoneCount -= result.length;
+					}
+					else if(game.turn == WGo.W)
+					{
+						blackStoneCount++;
+						whiteStoneCount -= result.length;
+					}
+
+					if(playAI == 1)
+					{
+						//var moveData = getAIplayerMove();
+						var ranVal = getRandomInt(0,100);
+						if(ranVal != 99)
+						{
+							result = simpleAI();
+							if(game.turn == WGo.B)
+							{
+								whiteStoneCount++;
+								blackStoneCount -= result.length;
+							}
+							else if(game.turn == WGo.W)
+							{
+								blackStoneCount++;
+								whiteStoneCount -= result.length;
+							}
+						}
+						else
+						{
+							game.pass();
+							alert("Computer has passed.");
+						}
+					}
+					updateBoard();
+				}
+				else
+				{
+					console.log("In onMouseClick something went terribly wrong.")
+				}
+			}
+		}
+	}
+	else if(passCount == 2)
+	{
+		//game has ended do nothing
+	}
+}
+
+//BOARD UPDATE FUNCTIONS AND HELPERS
+function hasPiece(xp,yp,get)
+{
+	for(var i = 0; i < stoneList.length; i++)
+	{
+		if(stoneList[i].position.x == xp && stoneList[i].position.y == yp)
+		{
+			if(get)
+			{
+				return stoneList[i];
+			}
+			else
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+function updateBoard()
+{
+	var result;
+	var result2;
+	var xp;
+	var yp;
+	for(var i = 0; i < 19; i++)
+	{
+		for(var j = 0; j < 19; j++)
+		{
+			result = game.getStone(i,j);
+			xp = (i*10)-90;
+			yp = (j*10)-90;
+
+			if(result == WGo.B)
+			{
+				if(!hasPiece(xp,yp,false))
+				{
+					GenerateStone(xp,yp,1);
+				}
+			}
+			else if(result == WGo.W)
+			{
+				if(!hasPiece(xp,yp,false))
+				{
+					GenerateStone(xp,yp,2);
+				}
+			}
+			else
+			{
+				result2 = hasPiece(xp,yp,true);
+				if(result2 == false)
+				{
+					//nothing
+				}
+				else
+				{
+					scene.remove(result2);
+
+					for(var k = 0; k < stoneList.length; k++)
+					{
+						if(stoneList[i] == result2)
+						{
+							stoneList.splice(k,1);
+						}
+					}
+				}
+			}
+
+		}
+	}
+}
+
+//Adds underlying cube board
+function AddCubes()
+{
+	var black = 0x0D0D0D;
+	var white = 0xFDFDFD;
+
+	//row 1
+	GenerateCube(-90,-90,black,'A1');
+	GenerateCube(-80,-90,white,'B1');
+	GenerateCube(-70,-90,black,'C1');
+	GenerateCube(-60,-90,white,'D1');
+	GenerateCube(-50,-90,black,'E1');
+	GenerateCube(-40,-90,white,'F1');
+	GenerateCube(-30,-90,black,'G1');
+	GenerateCube(-20,-90,white,'H1');
+	GenerateCube(-10,-90,black,'I1');
+	GenerateCube(0,-90,white, 'J1');
+	GenerateCube(10,-90,black,'K1');
+	GenerateCube(20,-90,white,'L1');
+	GenerateCube(30,-90,black,'M1');
+	GenerateCube(40,-90,white,'N1');
+	GenerateCube(50,-90,black,'O1');
+	GenerateCube(60,-90,white,'P1');
+	GenerateCube(70,-90,black,'Q1');
+	GenerateCube(80,-90,white,'R1');
+	GenerateCube(90,-90,black,'S1');
+	//row 2
+	GenerateCube(-90,-80,white,'A2');
+	GenerateCube(-80,-80,black,'B2');
+	GenerateCube(-70,-80,white,'C2');
+	GenerateCube(-60,-80,black,'D2');
+	GenerateCube(-50,-80,white,'E2');
+	GenerateCube(-40,-80,black,'F2');
+	GenerateCube(-30,-80,white,'G2');
+	GenerateCube(-20,-80,black,'H2');
+	GenerateCube(-10,-80,white,'I2');
+	GenerateCube(0,-80,black,'J2');
+	GenerateCube(10,-80,white,'K2');
+	GenerateCube(20,-80,black,'L2');
+	GenerateCube(30,-80,white,'M2');
+	GenerateCube(40,-80,black,'N2');
+	GenerateCube(50,-80,white,'O2');
+	GenerateCube(60,-80,black,'P2');
+	GenerateCube(70,-80,white,'Q2');
+	GenerateCube(80,-80,black,'R2');
+	GenerateCube(90,-80,white,'S2');
+	//row 3
+	GenerateCube(-90,-70,black,'A3');
+	GenerateCube(-80,-70,white,'B3');
+	GenerateCube(-70,-70,black,'C3');
+	GenerateCube(-60,-70,white,'D3');
+	GenerateCube(-50,-70,black,'E3');
+	GenerateCube(-40,-70,white,'F3');
+	GenerateCube(-30,-70,black,'G3');
+	GenerateCube(-20,-70,white,'H3');
+	GenerateCube(-10,-70,black,'I3');
+	GenerateCube(0,-70,white, 'J3');
+	GenerateCube(10,-70,black,'K3');
+	GenerateCube(20,-70,white,'L3');
+	GenerateCube(30,-70,black,'M3');
+	GenerateCube(40,-70,white,'N3');
+	GenerateCube(50,-70,black,'O3');
+	GenerateCube(60,-70,white,'P3');
+	GenerateCube(70,-70,black,'Q3');
+	GenerateCube(80,-70,white,'R3');
+	GenerateCube(90,-70,black,'S3');
+	//row 4
+	GenerateCube(-90,-60,white,'A4');
+	GenerateCube(-80,-60,black,'B4');
+	GenerateCube(-70,-60,white,'C4');
+	GenerateCube(-60,-60,black,'D4');
+	GenerateCube(-50,-60,white,'E4');
+	GenerateCube(-40,-60,black,'F4');
+	GenerateCube(-30,-60,white,'G4');
+	GenerateCube(-20,-60,black,'H4');
+	GenerateCube(-10,-60,white,'I4');
+	GenerateCube(0,-60,black,'J4');
+	GenerateCube(10,-60,white,'K4');
+	GenerateCube(20,-60,black,'L4');
+	GenerateCube(30,-60,white,'M4');
+	GenerateCube(40,-60,black,'N4');
+	GenerateCube(50,-60,white,'O4');
+	GenerateCube(60,-60,black,'P4');
+	GenerateCube(70,-60,white,'Q4');
+	GenerateCube(80,-60,black,'R4');
+	GenerateCube(90,-60,white,'S4');
+	//row 5
+	GenerateCube(-90,-50,black,'A5');
+	GenerateCube(-80,-50,white,'B5');
+	GenerateCube(-70,-50,black,'C5');
+	GenerateCube(-60,-50,white,'D5');
+	GenerateCube(-50,-50,black,'E5');
+	GenerateCube(-40,-50,white,'F5');
+	GenerateCube(-30,-50,black,'G5');
+	GenerateCube(-20,-50,white,'H5');
+	GenerateCube(-10,-50,black,'I5');
+	GenerateCube(0,-50,white, 'J5');
+	GenerateCube(10,-50,black,'K5');
+	GenerateCube(20,-50,white,'L5');
+	GenerateCube(30,-50,black,'M5');
+	GenerateCube(40,-50,white,'N5');
+	GenerateCube(50,-50,black,'O5');
+	GenerateCube(60,-50,white,'P5');
+	GenerateCube(70,-50,black,'Q5');
+	GenerateCube(80,-50,white,'R5');
+	GenerateCube(90,-50,black,'S5');
+	//row 6
+	GenerateCube(-90,-40,white,'A6');
+	GenerateCube(-80,-40,black,'B6');
+	GenerateCube(-70,-40,white,'C6');
+	GenerateCube(-60,-40,black,'D6');
+	GenerateCube(-50,-40,white,'E6');
+	GenerateCube(-40,-40,black,'F6');
+	GenerateCube(-30,-40,white,'G6');
+	GenerateCube(-20,-40,black,'H6');
+	GenerateCube(-10,-40,white,'I6');
+	GenerateCube(0,-40,black,'J6');
+	GenerateCube(10,-40,white,'K6');
+	GenerateCube(20,-40,black,'L6');
+	GenerateCube(30,-40,white,'M6');
+	GenerateCube(40,-40,black,'N6');
+	GenerateCube(50,-40,white,'O6');
+	GenerateCube(60,-40,black,'P6');
+	GenerateCube(70,-40,white,'Q6');
+	GenerateCube(80,-40,black,'R6');
+	GenerateCube(90,-40,white,'S6');
+	//row 7
+	GenerateCube(-90,-30,black,'A7');
+	GenerateCube(-80,-30,white,'B7');
+	GenerateCube(-70,-30,black,'C7');
+	GenerateCube(-60,-30,white,'D7');
+	GenerateCube(-50,-30,black,'E7');
+	GenerateCube(-40,-30,white,'F7');
+	GenerateCube(-30,-30,black,'G7');
+	GenerateCube(-20,-30,white,'H7');
+	GenerateCube(-10,-30,black,'I7');
+	GenerateCube(0,-30,white, 'J7');
+	GenerateCube(10,-30,black,'K7');
+	GenerateCube(20,-30,white,'L7');
+	GenerateCube(30,-30,black,'M7');
+	GenerateCube(40,-30,white,'N7');
+	GenerateCube(50,-30,black,'O7');
+	GenerateCube(60,-30,white,'P7');
+	GenerateCube(70,-30,black,'Q7');
+	GenerateCube(80,-30,white,'R7');
+	GenerateCube(90,-30,black,'S7');
+	//row 8
+	GenerateCube(-90,-20,white,'A8');
+	GenerateCube(-80,-20,black,'B8');
+	GenerateCube(-70,-20,white,'C8');
+	GenerateCube(-60,-20,black,'D8');
+	GenerateCube(-50,-20,white,'E8');
+	GenerateCube(-40,-20,black,'F8');
+	GenerateCube(-30,-20,white,'G8');
+	GenerateCube(-20,-20,black,'H8');
+	GenerateCube(-10,-20,white,'I8');
+	GenerateCube(0,-20,black,'J8');
+	GenerateCube(10,-20,white,'K8');
+	GenerateCube(20,-20,black,'L8');
+	GenerateCube(30,-20,white,'M8');
+	GenerateCube(40,-20,black,'N8');
+	GenerateCube(50,-20,white,'O8');
+	GenerateCube(60,-20,black,'P8');
+	GenerateCube(70,-20,white,'Q8');
+	GenerateCube(80,-20,black,'R8');
+	GenerateCube(90,-20,white,'S8');
+	//row 9
+	GenerateCube(-90,-10,black,'A9');
+	GenerateCube(-80,-10,white,'B9');
+	GenerateCube(-70,-10,black,'C9');
+	GenerateCube(-60,-10,white,'D9');
+	GenerateCube(-50,-10,black,'E9');
+	GenerateCube(-40,-10,white,'F9');
+	GenerateCube(-30,-10,black,'G9');
+	GenerateCube(-20,-10,white,'H9');
+	GenerateCube(-10,-10,black,'I9');
+	GenerateCube(0,-10,white, 'J9');
+	GenerateCube(10,-10,black,'K9');
+	GenerateCube(20,-10,white,'L9');
+	GenerateCube(30,-10,black,'M9');
+	GenerateCube(40,-10,white,'N9');
+	GenerateCube(50,-10,black,'O9');
+	GenerateCube(60,-10,white,'P9');
+	GenerateCube(70,-10,black,'Q9');
+	GenerateCube(80,-10,white,'R9');
+	GenerateCube(90,-10,black,'S9');
+	//row 10
+	GenerateCube(-90,0,white,'A10');
+	GenerateCube(-80,0,black,'B10');
+	GenerateCube(-70,0,white,'C10');
+	GenerateCube(-60,0,black,'D10');
+	GenerateCube(-50,0,white,'E10');
+	GenerateCube(-40,0,black,'F10');
+	GenerateCube(-30,0,white,'G10');
+	GenerateCube(-20,0,black,'H10');
+	GenerateCube(-10,0,white,'I10');
+	GenerateCube(0,0,black,'J10');
+	GenerateCube(10,0,white,'K10');
+	GenerateCube(20,0,black,'L10');
+	GenerateCube(30,0,white,'M10');
+	GenerateCube(40,0,black,'N10');
+	GenerateCube(50,0,white,'O10');
+	GenerateCube(60,0,black,'P10');
+	GenerateCube(70,0,white,'Q10');
+	GenerateCube(80,0,black,'R10');
+	GenerateCube(90,0,white,'S10');
+	//row 11
+	GenerateCube(-90,10,black,'A11');
+	GenerateCube(-80,10,white,'B11');
+	GenerateCube(-70,10,black,'C11');
+	GenerateCube(-60,10,white,'D11');
+	GenerateCube(-50,10,black,'E11');
+	GenerateCube(-40,10,white,'F11');
+	GenerateCube(-30,10,black,'G11');
+	GenerateCube(-20,10,white,'H11');
+	GenerateCube(-10,10,black,'I11');
+	GenerateCube(0,10,white, 'J11');
+	GenerateCube(10,10,black,'K11');
+	GenerateCube(20,10,white,'L11');
+	GenerateCube(30,10,black,'M11');
+	GenerateCube(40,10,white,'N11');
+	GenerateCube(50,10,black,'O11');
+	GenerateCube(60,10,white,'P11');
+	GenerateCube(70,10,black,'Q11');
+	GenerateCube(80,10,white,'R11');
+	GenerateCube(90,10,black,'S11');
+	//row 12
+	GenerateCube(-90,20,white,'A12');
+	GenerateCube(-80,20,black,'B12');
+	GenerateCube(-70,20,white,'C12');
+	GenerateCube(-60,20,black,'D12');
+	GenerateCube(-50,20,white,'E12');
+	GenerateCube(-40,20,black,'F12');
+	GenerateCube(-30,20,white,'G12');
+	GenerateCube(-20,20,black,'H12');
+	GenerateCube(-10,20,white,'I12');
+	GenerateCube(0,20,black,'J12');
+	GenerateCube(10,20,white,'K12');
+	GenerateCube(20,20,black,'L12');
+	GenerateCube(30,20,white,'M12');
+	GenerateCube(40,20,black,'N12');
+	GenerateCube(50,20,white,'O12');
+	GenerateCube(60,20,black,'P12');
+	GenerateCube(70,20,white,'Q12');
+	GenerateCube(80,20,black,'R12');
+	GenerateCube(90,20,white,'S12');
+	//row 13
+	GenerateCube(-90,30,black,'A13');
+	GenerateCube(-80,30,white,'B13');
+	GenerateCube(-70,30,black,'C13');
+	GenerateCube(-60,30,white,'D13');
+	GenerateCube(-50,30,black,'E13');
+	GenerateCube(-40,30,white,'F13');
+	GenerateCube(-30,30,black,'G13');
+	GenerateCube(-20,30,white,'H13');
+	GenerateCube(-10,30,black,'I13');
+	GenerateCube(0,30,white, 'J13');
+	GenerateCube(10,30,black,'K13');
+	GenerateCube(20,30,white,'L13');
+	GenerateCube(30,30,black,'M13');
+	GenerateCube(40,30,white,'N13');
+	GenerateCube(50,30,black,'O13');
+	GenerateCube(60,30,white,'P13');
+	GenerateCube(70,30,black,'Q13');
+	GenerateCube(80,30,white,'R13');
+	GenerateCube(90,30,black,'S13');
+	//row 14
+	GenerateCube(-90,40,white,'A14');
+	GenerateCube(-80,40,black,'B14');
+	GenerateCube(-70,40,white,'C14');
+	GenerateCube(-60,40,black,'D14');
+	GenerateCube(-50,40,white,'E14');
+	GenerateCube(-40,40,black,'F14');
+	GenerateCube(-30,40,white,'G14');
+	GenerateCube(-20,40,black,'H14');
+	GenerateCube(-10,40,white,'I14');
+	GenerateCube(0,40,black,'J14');
+	GenerateCube(10,40,white,'K14');
+	GenerateCube(20,40,black,'L14');
+	GenerateCube(30,40,white,'M14');
+	GenerateCube(40,40,black,'N14');
+	GenerateCube(50,40,white,'O14');
+	GenerateCube(60,40,black,'P14');
+	GenerateCube(70,40,white,'Q14');
+	GenerateCube(80,40,black,'R14');
+	GenerateCube(90,40,white,'S14');
+	//row 15
+	GenerateCube(-90,50,black,'A15');
+	GenerateCube(-80,50,white,'B15');
+	GenerateCube(-70,50,black,'C15');
+	GenerateCube(-60,50,white,'D15');
+	GenerateCube(-50,50,black,'E15');
+	GenerateCube(-40,50,white,'F15');
+	GenerateCube(-30,50,black,'G15');
+	GenerateCube(-20,50,white,'H15');
+	GenerateCube(-10,50,black,'I15');
+	GenerateCube(0,50,white, 'J15');
+	GenerateCube(10,50,black,'K15');
+	GenerateCube(20,50,white,'L15');
+	GenerateCube(30,50,black,'M15');
+	GenerateCube(40,50,white,'N15');
+	GenerateCube(50,50,black,'O15');
+	GenerateCube(60,50,white,'P15');
+	GenerateCube(70,50,black,'Q15');
+	GenerateCube(80,50,white,'R15');
+	GenerateCube(90,50,black,'S15');
+	//row 16
+	GenerateCube(-90,60,white,'A16');
+	GenerateCube(-80,60,black,'B16');
+	GenerateCube(-70,60,white,'C16');
+	GenerateCube(-60,60,black,'D16');
+	GenerateCube(-50,60,white,'E16');
+	GenerateCube(-40,60,black,'F16');
+	GenerateCube(-30,60,white,'G16');
+	GenerateCube(-20,60,black,'H16');
+	GenerateCube(-10,60,white,'I16');
+	GenerateCube(0,60,black,'J16');
+	GenerateCube(10,60,white,'K16');
+	GenerateCube(20,60,black,'L16');
+	GenerateCube(30,60,white,'M16');
+	GenerateCube(40,60,black,'N16');
+	GenerateCube(50,60,white,'O16');
+	GenerateCube(60,60,black,'P16');
+	GenerateCube(70,60,white,'Q16');
+	GenerateCube(80,60,black,'R16');
+	GenerateCube(90,60,white,'S16');
+	//row 17
+	GenerateCube(-90,70,black,'A17');
+	GenerateCube(-80,70,white,'B17');
+	GenerateCube(-70,70,black,'C17');
+	GenerateCube(-60,70,white,'D17');
+	GenerateCube(-50,70,black,'E17');
+	GenerateCube(-40,70,white,'F17');
+	GenerateCube(-30,70,black,'G17');
+	GenerateCube(-20,70,white,'H17');
+	GenerateCube(-10,70,black,'I17');
+	GenerateCube(0,70,white, 'J17');
+	GenerateCube(10,70,black,'K17');
+	GenerateCube(20,70,white,'L17');
+	GenerateCube(30,70,black,'M17');
+	GenerateCube(40,70,white,'N17');
+	GenerateCube(50,70,black,'O17');
+	GenerateCube(60,70,white,'P17');
+	GenerateCube(70,70,black,'Q17');
+	GenerateCube(80,70,white,'R17');
+	GenerateCube(90,70,black,'S17');
+	//row 18
+	GenerateCube(-90,80,white,'A18');
+	GenerateCube(-80,80,black,'B18');
+	GenerateCube(-70,80,white,'C18');
+	GenerateCube(-60,80,black,'D18');
+	GenerateCube(-50,80,white,'E18');
+	GenerateCube(-40,80,black,'F18');
+	GenerateCube(-30,80,white,'G18');
+	GenerateCube(-20,80,black,'H18');
+	GenerateCube(-10,80,white,'I18');
+	GenerateCube(0,80,black,'J18');
+	GenerateCube(10,80,white,'K18');
+	GenerateCube(20,80,black,'L18');
+	GenerateCube(30,80,white,'M18');
+	GenerateCube(40,80,black,'N18');
+	GenerateCube(50,80,white,'O18');
+	GenerateCube(60,80,black,'P18');
+	GenerateCube(70,80,white,'Q18');
+	GenerateCube(80,80,black,'R18');
+	GenerateCube(90,80,white,'S18');
+	//row 19
+	GenerateCube(-90,90,black,'A19');
+	GenerateCube(-80,90,white,'B19');
+	GenerateCube(-70,90,black,'C19');
+	GenerateCube(-60,90,white,'D19');
+	GenerateCube(-50,90,black,'E19');
+	GenerateCube(-40,90,white,'F19');
+	GenerateCube(-30,90,black,'G19');
+	GenerateCube(-20,90,white,'H19');
+	GenerateCube(-10,90,black,'I19');
+	GenerateCube(0,90,white, 'J19');
+	GenerateCube(10,90,black,'K19');
+	GenerateCube(20,90,white,'L19');
+	GenerateCube(30,90,black,'M19');
+	GenerateCube(40,90,white,'N19');
+	GenerateCube(50,90,black,'O19');
+	GenerateCube(60,90,white,'P19');
+	GenerateCube(70,90,black,'Q19');
+	GenerateCube(80,90,white,'R19');
+	GenerateCube(90,90,black,'S19');
+}
+
+function SetupGame()
+{
+	//game
+	game = new WGo.Game();
+	game.firstPosition();
+
+	camera.position.x = 0;
+	camera.position.y = -150//-130;
+	camera.position.z = 170//150;
+	camera.rotation.x = Math.PI/5;
+	camera.rotation.y = 0;
+	camera.rotation.z = 0;
+
+	//light
+	SetupLight();
+
+	//scene objects
+	GenerateStone();
+	CreateGoTable();
+	CreateGoLines();
+	CreateGoCircles();
+	CreateTatamiMat();
+	AddCubes();
+	CreateHelpCircle();
+}
+
+function SetupLight()
+{
+	var spotLight = new THREE.SpotLight(0xFFFFFF,0.5);
+	spotLight.position.set(0, 0, 100);
+	spotLight.exponent = 5.0;
+	spotLight.decay = 1;
+	spotLight.shadowCameraNear = 50;
+	spotLight.shadowCameraFar = 1000;
+	spotLight.castShadow = true;
+	scene.add(spotLight);
+
+	directionLight = new THREE.DirectionalLight(0xffffff, 0.25);
+	directionLight.position.set(0,0,100);
+	scene.add(directionLight);
+
+	var ambientLight = new THREE.AmbientLight(0x404040);
+	scene.add(ambientLight);
+
+}
+
+function GoToMenu()
+{
+	scene = new THREE.Scene();
+	camera.position.x = 0;
+	camera.position.y = 0;
+	camera.position.z = 100;
+	camera.rotation.x = 0;
+
+	SetupLight();
+
+	CreateBackground();
+	CreateMenuText();
+	inMenu = 1;
+}
+
+//*********AI FUNCTIONS AND DATA STRUCTURES*************
+//Tree Functions
+function Record(position,xpos,ypos,color)
+{
+	this.position = position;
+	this.xpos = xpos;
+	this.ypos = ypos;
+	this.color = color;
+	this.value = -Infinity;
+}
+
+function Node(record)
+{
+	this.data = record;
+	this.parent = null;
+	this.children = [];
+}
+
+function Tree(record)
+{
+	var node = new Node(record);
+	this._root = node;
+}
+
+Tree.prototype.traverseDF = function(callback)
+{
+	(function recurse(currentNode)
+	{
+		for(var i = 0, length = currentNode.children.length; i < length;)
+		{
+			recurse(currentNode.children[i]);
+		}
+		callback(currentNode);
+	})(this._root);
+};
+
+Tree.prototype.traverseBF = function(callback)
+{
+	var queue = new Queue();
+	queue.enqueue(this._root);
+	currentTree = queue.dequeue();
+	while(currentTreee)
+	{
+		for(var i = 0, length = currentTree.children.length; i < length; i++)
+		{
+			queue.enqueue(currentTree.children[i]);
+		}
+		callback(currentTree);
+		currentTree = queue.dequeue();
+	}
+};
+
+Tree.prototype.contains = function(callback, traversal) {
+    traversal.call(this, callback);
+};
+
+Tree.prototype.add = function(data, toData, traversal)
+{
+	var child = new Node(data);
+		parent = null,
+		callback = function(node)
+		{
+			if(node.data === toData)
+			{
+				parent = node;
+			}
+		};
+	this.contains(callback,traversal);
+
+	if(parent)
+	{
+		parent.children.push(child);
+		child.parent = parent;
+	} else {
+		throw new Error('Cannot add node to a non-existent parent.');
+	}
+};
+
+Tree.prototype.remove = function(data, fromData, traversal) {
+    var tree = this,
+        parent = null,
+        childToRemove = null,
+        index;
+ 
+    var callback = function(node) {
+        if (node.data === fromData) {
+            parent = node;
+        }
+    };
+ 
+    this.contains(callback, traversal);
+ 
+    if (parent) {
+        index = findIndex(parent.children, data);
+ 
+        if (index === undefined) {
+            throw new Error('Node to remove does not exist.');
+        } else {
+            childToRemove = parent.children.splice(index, 1);
+        }
+    } else {
+        throw new Error('Parent does not exist.');
+    }
+ 
+    return childToRemove;
+};
+ 
+function findIndex(arr, data) {
+    var index;
+ 
+    for (var i = 0; i < arr.length; i++) {
+        if (arr[i].data === data) {
+            index = i;
+        }
+    }
+ 
+    return index;
+}
+//end tree function definitions
+
+function getAIplayerMove(position,color)
+{
+	var record, node, tree;
+	for(var i = 0; i < 19; i++)
+	{
+		for(var j = 0; j < 19; j++)
+		{
+			if(game.isValid(i,j,color))
+			{
+				record = new Record(position,i,j,color);
+				node = new Node(record);
+				if(i == 0)
+				{
+					tree = new Tree(node);
+				}
+				else
+				{
+					tree.add(record, tree._root.data, tree.traverseDF);
+				}
+			}
+		}
+	}
+
+	minimax(tree._root,1,-Infinity,Infinity,true);
+
+	var max = -Infinity;
+	var moveData = null;
+	tree.traverseDF(function(node)
+	{
+		if(node.data.value > max )
+		{
+			moveData = node.data;
+			max = node.data.value;
+		}
+	});
+	return moveData;
+}
+//initial call minimax(root,depth,-inf,+inf,true)
+function minimax(node,depth,alpha,beta,player)
+{
+	var value;
+	if(depth == 0 || node.children.length == 0)
+	{
+		value = evaluate(node.data.position,node.data.xpos,node.data.ypos,node.data.color);
+		node.data.value = value;
+		return value;
+	}
+
+	if(player)
+	{
+		value = -Infinity;
+		for(var i = 0; i < node.children.length; i++)
+		{
+			value = Math.max(value, minimax(node.children[i], depth-1, alpha,beta,false));
+			alpha = Math.max(alpha,value);
+			if(beta <= alpha)
+				break;
+		}
+		node.data.value = value;
+		return value;
+	}
+	else
+	{
+		value = Infinity;
+		for(var i = 0; i < node.children.length; i++)
+		{
+			value = Math.min(value, minimax(node.children[i], depth-1, alpha,beta,true));
+			beta = Math.min(beta,value);
+			if(beta <= alpha)
+				break;
+		}
+		node.data.value = value;
+		return value;
+	}
+
+}
+
+//color of AI player who wants to win
+function evaluate(position,x,y,color)
+{
+	var gameClone = new WGo.Game();
+	gameClone.pushPosition(position);
+	
+	if(!gameClone.isValid(x,y,color))
+	{
+		return -Infinity;
+	}
+	else if(gameClone.play(x,y,color).length > 0)
+	{
+		return 50;
+	}
+	else
+	{
+		position.set(x,y,color);
+		var results = adjacencies(position,x,y,color);
+		var player = results.pop();
+		var enemy = results.pop();
+		if(player > enemy)
+		{
+			return 10;
+		}
+		else
+		{
+			return -10;
+		}
+	}
+}
+
+function adjacencies(position,x,y,color)
+{
+	var myCount = 0;
+	var enemyCount = 0;
+	var resultList = [];
+	for(var i = -1; i < 2; i++)
+	{
+		for(var j = -1; j < 2; j++)
+		{
+			if(position.get(x+1,y+j) == color)
+			{
+				myCount++;
+			}
+			else if(position.get(x+1,y+j) == 0)
+			{
+				//do nothing
+			}
+			else
+			{
+				enemyCount++;
+			}
+		}
+	}
+
+	resultList.push(enemyCount);
+	resultList.push(myCount);
+	return resultList;
+}
+
+function simpleAI(position)
+{
+	var col = getRandomInt(0,19);
+	var row = getRandomInt(0,19);
+
+	while(!game.isValid(col,row))
+	{
+		col = getRandomInt(0,19);
+		row = getRandomInt(0,19);
+	}
+
+	var result = game.play(col,row);
+	return result;
+}
+
+function getRandomInt(min,max)
+{
+	return Math.floor(Math.random() * (max - min) + min);
+}
+
+
+function initialize()
+{
+	
+
+	//scene
+	scene = new THREE.Scene();
+
+	//camera
+	camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 0.1, 3000);
+
+	camera.position.x = 0;
+	camera.position.y = 0;
+	camera.position.z = 100;
+	
+	/*camera.position.x = 0;
+	camera.position.y = -150//-130;
+	camera.position.z = 170//150;
+	camera.rotation.x = Math.PI/5;
+	camera.rotation.y = 0;
+	camera.rotation.z = 0;*/
+
+	//light
+	SetupLight();
+
+
+	//renderer
+	renderer = new THREE.WebGLRenderer();
+	renderer.setClearColor(0x000000, 0);
+	renderer.setSize(window.innerWidth, window.innerHeight);
+	renderer.setPixelRatio( window.devicePixelRatio);
+	renderer.shadowMap.Enabled = true;
+	renderer.autoClear = false;
+
+	//raycaster
+	raycaster = new THREE.Raycaster();
+	
+	//environment
+	CreateBackground();
+	CreateMenuText();
+
+	LoadSounds();
+
+	//Clock
+	gameClock = new THREE.Clock(true);
+	gameClock.getDelta();
+
+	alert("Welcome to THREE.js Go!, press 'H' in game for help!");
+
+	//document
+	document.body.appendChild(renderer.domElement);
+
+	//Event Listeners
+	document.addEventListener( 'mousemove', onDocumentMouseMove, false );
+	document.addEventListener('click', onMouseClick, false);
+	//window.addEventListener( 'resize', onWindowResize, false );
+
+	render();
+}
+
+function render()
+{
+	requestAnimationFrame( render );
+	renderer.setViewport(0,0,window.innerWidth,window.innerHeight);
+	renderer.render(scene,camera);
+
+	if(inMenu == 1)
+	{
+		if(keyboard.pressed("1"))
+		{
+			for(var i = 0; i < scene.children.length; i++)
+			{
+				scene.remove(scene.children[i]);
+			}
+			scene.remove(ukiyoMesh);
+			scene.remove(threejsMesh);
+			SetupGame();
+			inMenu = 0;
+			playAI = 0;
+		}
+		if(keyboard.pressed("2"))
+		{
+			for(var i = 0; i < scene.children.length; i++)
+			{
+				scene.remove(scene.children[i]);
+			}
+			scene.remove(ukiyoMesh);
+			scene.remove(threejsMesh);
+			SetupGame();
+			inMenu = 0;
+			playAI = 1;
+		}
+	}
+	else
+	{
+
+		if(keyboard.pressed("P"))
+		{
+			if(gameClock.getDelta() > 2.0)
+			{
+				game.pass();
+				if(game.turn == WGo.W)
+				{
+					alert("Black has passed.");
+					passCount++;
+				}
+				else if(game.turn == WGo.B)
+				{
+					alert("White has passed");
+					passCount++;
+				}
+			}
+
+		}
+		else if(keyboard.pressed("E"))
+		{
+			GoToMenu();
+		}
+		else if(keyboard.pressed("I"))
+		{
+			if(gameClock.getDelta() > 2.0)
+			{
+				var whiteCount = game.getCaptureCount(WGo.W);
+				var blackCount = game.getCaptureCount(WGo.B);
+				alert("White has captured " + whiteCount + " pieces.\n\n" + "Black has captured " + blackCount + " pieces.");
+			}
+		}
+		else if(keyboard.pressed("U"))
+		{
+			if(gameClock.getDelta() > 2.0)
+			{
+				game.popPosition();
+				updateBoard();
+				stoneList.pop();
+			}
+		}
+		else if(keyboard.pressed("H"))
+		{
+			if(gameClock.getDelta() > 2.0)
+			{
+				alert("------GAME HELP------\n\n Click to place pieces\nPress 'P' to pass\n Press 'I' for capture info\n Pree 'U' to undo move\n Pree 'E' to return to main menu.")
+			}
+		}
+
+		if(passCount == 2)
+		{
+			var whiteCount = game.getCaptureCount(WGo.W);
+			var blackCount = game.getCaptureCount(WGo.B);
+			if(whiteCount + whiteStoneCount > blackCount + blackStoneCount)
+			{
+				alert("White wins! Press 'E' to exit to main menu.");
+			}
+			else if(blackCount + blackStoneCount > whiteCount + whiteStoneCount)
+			{
+				alert("Black wins! Press 'E' to exit to main menu.");
+			}
+			else
+			{
+				alert("Score is tied, but white wins because of black's first move advantage. Press 'E' to exit to main menu.")
+			}
+
+			if(keyboard.pressed("E"))
+			{
+				GoToMenu();
+			}
+		}
+
+	}
+
+}
+
+window.onload = initialize;
+</script>
+
+</body>
+</html>
+
